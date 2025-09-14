@@ -100,6 +100,16 @@ async function initDatabase() {
         original_name TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+      
+      CREATE TABLE IF NOT EXISTS user_vehicles (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        brand TEXT NOT NULL,
+        model TEXT NOT NULL,
+        km INTEGER,
+        model_year INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
     `);
     console.log('✅ Database tables initialized');
   } catch (error) {
@@ -447,6 +457,80 @@ app.get('/', (req, res) => {
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, ts: Date.now() });
+});
+
+// My vehicles endpoints
+app.get('/api/my/vehicles', async (req, res) => {
+  try {
+    const user = await requireAuth(req, res);
+    if(!user) return;
+    
+    const rows = await query('SELECT * FROM user_vehicles WHERE user_id = $1 ORDER BY created_at ASC', [user.id]);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.post('/api/my/vehicles', async (req, res) => {
+  try {
+    const user = await requireAuth(req, res);
+    if(!user) return;
+    
+    const { brand, model, km, model_year } = req.body;
+    if(!brand || !model) return res.status(400).json({ error: 'brand & model gerekli' });
+    
+    const kmValue = km ? parseInt(km, 10) : null;
+    const yearValue = model_year ? parseInt(model_year, 10) : null;
+    
+    await query('INSERT INTO user_vehicles (user_id, brand, model, km, model_year) VALUES ($1,$2,$3,$4,$5)', 
+               [user.id, brand.trim(), model.trim(), kmValue, yearValue]);
+    
+    const list = await query('SELECT * FROM user_vehicles WHERE user_id = $1 ORDER BY created_at ASC', [user.id]);
+    res.status(201).json(list);
+  } catch (error) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.patch('/api/my/vehicles/:id', async (req, res) => {
+  try {
+    const user = await requireAuth(req, res);
+    if(!user) return;
+    
+    const { id } = req.params;
+    const veh = await queryOne('SELECT * FROM user_vehicles WHERE id = $1 AND user_id = $2', [id, user.id]);
+    if(!veh) return res.status(404).json({ error: 'Not found' });
+    
+    const { brand = veh.brand, model = veh.model, km, model_year } = req.body;
+    const kmValue = km !== undefined ? (km ? parseInt(km, 10) : null) : veh.km;
+    const yearValue = model_year !== undefined ? (model_year ? parseInt(model_year, 10) : null) : veh.model_year;
+    
+    await query('UPDATE user_vehicles SET brand = $1, model = $2, km = $3, model_year = $4 WHERE id = $5', 
+               [brand.trim(), model.trim(), kmValue, yearValue, id]);
+    
+    const list = await query('SELECT * FROM user_vehicles WHERE user_id = $1 ORDER BY created_at ASC', [user.id]);
+    res.json(list);
+  } catch (error) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.delete('/api/my/vehicles/:id', async (req, res) => {
+  try {
+    const user = await requireAuth(req, res);
+    if(!user) return;
+    
+    const { id } = req.params;
+    const veh = await queryOne('SELECT * FROM user_vehicles WHERE id = $1 AND user_id = $2', [id, user.id]);
+    if(!veh) return res.status(404).json({ error: 'Not found' });
+    
+    await query('DELETE FROM user_vehicles WHERE id = $1', [id]);
+    const list = await query('SELECT * FROM user_vehicles WHERE user_id = $1 ORDER BY created_at ASC', [user.id]);
+    res.json(list);
+  } catch (error) {
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // Predefined data
