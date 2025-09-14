@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EV Problem Tracker</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="brand-block" role="banner">
+        <a href="/" class="site-logo" aria-label="Ana sayfa" title="Ana sayfa">
+          <svg width="60" height="45" viewBox="0 0 400 300" fill="none">
+            <!-- Car body -->
+            <path d="M80 120 C80 100, 100 80, 120 80 L280 80 C300 80, 320 100, 320 120 L350 140 C370 150, 380 170, 380 190 L380 220 C380 240, 360 250, 350 250 L320 250 C310 270, 290 280, 270 280 C250 280, 230 270, 220 250 L180 250 C170 270, 150 280, 130 280 C110 280, 90 270, 80 250 L50 250 C40 250, 20 240, 20 220 L20 190 C20 170, 30 150, 50 140 Z" fill="#2196F3"/>
+            <!-- Window -->
+            <path d="M90 120 C90 110, 100 100, 110 100 L290 100 C300 100, 310 110, 310 120 L310 140 L90 140 Z" fill="#87CEEB"/>
+            <!-- Window separator -->
+            <rect x="195" y="100" width="10" height="40" fill="#2196F3"/>
+            <!-- Lightning bolt -->
+            <path d="M220 160 L240 140 L230 140 L245 120 L225 140 L235 140 Z" fill="#4CAF50"/>
+            <!-- Wheels -->
+            <circle cx="120" cy="240" r="30" fill="#333"/>
+            <circle cx="120" cy="240" r="15" fill="#666"/>
+            <circle cx="280" cy="240" r="30" fill="#333"/>
+            <circle cx="280" cy="240" r="15" fill="#666"/>
+            <!-- Magnifying glass -->
+            <circle cx="320" cy="160" r="40" fill="#26A69A" opacity="0.9"/>
+            <circle cx="320" cy="160" r="28" fill="white"/>
+            <rect x="350" y="190" width="8" height="30" rx="4" fill="#26A69A" transform="rotate(45 354 205)"/>
+            <!-- Exclamation mark -->
+            <rect x="315" y="140" width="10" height="25" rx="5" fill="#1976D2"/>
+            <circle cx="320" cy="175" r="4" fill="#1976D2"/>
+          </svg>
+        </a>
+      </div>
+      <div class="flex-spacer"></div>
+      <div id="auth-bar" class="auth-bar">
+      <div id="auth-when-logged-out" class="auth-out">
+        <button id="open-auth" class="outline">Giriş / Kayıt</button>
+        <div id="auth-panel" class="auth-panel hidden">
+          <div class="tabs">
+            <button type="button" data-tab="login" class="active">Giriş</button>
+            <button type="button" data-tab="register">Kayıt</button>
+          </div>
+          <form id="login-form" class="stack form-login" autocomplete="off">
+            <label>Kullanıcı Adı<input name="username" required minlength="3" /></label>
+            <label>Şifre<input name="password" type="password" required minlength="6" /></label>
+            <button type="submit" class="primary">Giriş Yap</button>
+            <p class="form-msg" id="login-msg"></p>
+          </form>
+          <form id="register-form" class="stack form-register hidden" autocomplete="off">
+            <label>Kullanıcı Adı<input name="username" required minlength="3" /></label>
+            <label>Şifre<input name="password" type="password" required minlength="6" /></label>
+            <label>Şifre (Tekrar)<input name="password2" type="password" required minlength="6" /></label>
+            <div class="pw-strength" id="pw-strength"></div>
+            <button type="submit" class="primary">Kayıt Ol</button>
+            <p class="form-msg" id="register-msg"></p>
+          </form>
+        </div>
+      </div>
+      <div id="auth-when-logged-in" class="auth-in hidden">
+    <button id="notif-bell" class="notif-bell" aria-label="Bildirimler">
+      <div class="notif-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span id="notif-count" class="notif-badge" hidden>0</span>
+      </div>
+    </button>
+    <button id="new-issue-btn" class="outline primary-act" title="Yeni problem oluştur">+ Problem</button>
+    <div id="notif-panel" class="notif-panel" hidden>
+      <div class="notif-head">
+        <span>Bildirimler</span>
+        <button id="notif-markall" class="btn btn-link">Tümünü okundu işaretle</button>
+      </div>
+      <div id="notif-list" class="notif-list"></div>
+    </div>
+    <span id="current-user" class="user-chip" title="Profil"></span>
+    <button id="logout-btn" class="outline warn-act">Çıkış</button>
+      </div>
+      </div>
+    </div>
+  </header>
+  <main>
+  <section class="filter-section">
+      <div class="filter-header-row">
+        <h2>Filtrele & Ara</h2>
+        <button type="button" id="toggle-filters" class="outline small" aria-expanded="true" aria-controls="filters-wrap">Daralt</button>
+      </div>
+  <div id="brand-logo-filter" class="brand-logo-filter" aria-label="Marka hızlı filtre"></div>
+      <div class="filters" id="filters-wrap">
+        <select id="filter-brand"><option value="">Marka</option></select>
+        <select id="filter-model"><option value="">Model</option></select>
+        <select id="filter-issue-type"><option value="">Arıza Türü</option></select>
+        <input id="search" placeholder="Kelime ara..." />
+        <button id="refresh">Yenile</button>
+  <button id="my-issues-btn" class="outline" title="Sadece kendi problemlerim" style="margin-left:auto;">Benim Problemlerim</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Paylaşılan Problemler</h2>
+      <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap; margin-bottom:.4rem;">
+        <button id="bulk-delete-my-issues" class="outline warn-act" style="display:none;" title="Tüm kendi problemlerimi sil">Hepsini Sil (Benim)</button>
+      </div>
+      <div id="issues" class="issues-list"></div>
+  <div id="scroll-sentinel" style="height:1px;"></div>
+      <div id="issues-pagination" class="pagination" style="margin-top:1rem; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;">
+        <button id="page-prev" disabled>&lt;</button>
+        <span id="page-info" style="font-size:.8rem; opacity:.8;">Sayfa 1</span>
+        <button id="page-next" disabled>&gt;</button>
+        <label style="margin-left:auto; font-size:.7rem; display:flex; align-items:center; gap:.25rem;">Sayfa Boyutu
+          <select id="page-size">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+          </select>
+        </label>
+      </div>
+    </section>
+  </main>
+  <!-- Profile & Vehicles Modal -->
+  <div id="profile-modal" class="modal-overlay hidden" aria-hidden="true" role="dialog">
+    <div class="modal">
+      <button class="close" data-close="profile-modal" aria-label="Kapat">×</button>
+      <h2>Profil & Araçlarım</h2>
+      <form id="profile-form" class="profile-form">
+        <p style="margin:0 0 .6rem; font-size:.75rem; opacity:.8;">Araç ekleyin. Problem oluştururken listeden hızlıca seçebilirsiniz.</p>
+        <small id="profile-msg"></small>
+      </form>
+      <div class="user-vehicles">
+        <h3 style="margin-top:1rem; font-size:1rem;">Araç Listem</h3>
+        <form id="add-vehicle-form" class="mini-form">
+          <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:.5rem;">
+            <select id="add-veh-brand" required></select>
+            <select id="add-veh-model" required></select>
+            <input id="add-veh-year" type="number" placeholder="Model Yılı" min="2010" max="2030" />
+            <input id="add-veh-km" type="number" placeholder="KM" min="0" max="999999" />
+            <button type="submit">Ekle</button>
+          </div>
+        </form>
+        <div id="my-vehicles-list" class="vehicles-list"></div>
+      </div>
+    </div>
+  </div>
+  <!-- New Issue Modal -->
+  <div id="issue-modal" class="modal-overlay hidden" aria-hidden="true" role="dialog">
+    <div class="modal">
+      <button class="close" data-close="issue-modal" aria-label="Kapat">×</button>
+      <h2>Yeni Problem Bildir</h2>
+      <form id="issue-form">
+        <div class="grid">
+          <label>Kayıtlı Araçlarım
+            <select id="my-vehicle-combo">
+              <option value="">(Seç veya manuel gir)</option>
+            </select>
+          </label>
+          <label>Marka
+            <select name="brand" id="brand-select" required></select>
+          </label>
+          <label>Model
+            <select name="model" id="model-select" required></select>
+          </label>
+          <label>Başlık<input name="title" required /></label>
+          <label>Arıza Türü
+            <select name="issue_type" id="issue-type-select"></select>
+          </label>
+          <label>Özel Arıza Türü (listede yoksa)
+            <input name="issue_type_custom" id="issue-type-custom" placeholder="Kendi tanımın" />
+          </label>
+        </div>
+        <label>Açıklama<textarea name="description" required></textarea></label>
+        <fieldset class="hotspot-field">
+          <legend>Arıza Konumu (İsteğe bağlı)</legend>
+          <div class="vehicle-view-selector" style="margin-bottom:.8rem;">
+            <label>Araç Görünümü
+              <select id="vehicle-view-select">
+                <option value="">Görünüm Seçiniz</option>
+                <optgroup label="Dış Kısım">
+                  <option value="exterior-front">Dış - Önü</option>
+                  <option value="exterior-right">Dış - Sağ</option>
+                  <option value="exterior-left">Dış - Sol</option>
+                  <option value="exterior-rear">Dış - Arka</option>
+                </optgroup>
+                <optgroup label="İç Kısım">
+                  <option value="interior-front">İç - Ön Panel</option>
+                  <option value="interior-rear">İç - Arka Kısım</option>
+                </optgroup>
+              </select>
+            </label>
+          </div>
+          <div class="hotspot-wrap" id="hotspot-wrap" style="display:none;">
+            <img id="hotspot-base" src="/img/cabin-wireframe.jpg" alt="Araç görsel" />
+            <div id="hotspot-layer" class="hotspot-layer" role="group" aria-label="Konum seçimi"></div>
+          </div>
+          <div class="hotspot-preview-row" style="margin-top:.5rem; display:flex; align-items:center; gap:.7rem;">
+            <div id="hotspot-mini-preview" class="mini-loc-preview" style="width:90px; height:50px; border-radius:7px; border:1px solid #2a313a; background:#181c22; position:relative; overflow:hidden; display:none;"></div>
+            <button type="button" id="hotspot-enlarge-btn" class="outline" style="font-size:.7rem; padding:.3rem .7rem; display:none;">Büyüt</button>
+          </div>
+          <div class="hotspot-cats">
+            <label>Yeni Nokta Kategorisi
+              <select id="hotspot-category">
+                <option value="">(Önce görünüm seçin)</option>
+              </select>
+            </label>
+            <button type="button" id="hotspot-clear" class="outline warn-act">Tüm Noktaları Temizle</button>
+          </div>
+          <div id="hotspot-points-list" class="hotspot-points-list" style="margin-top:.7rem; display:none;">
+            <h4 style="margin:0 0 .5rem; font-size:.8rem;">İşaretli Noktalar:</h4>
+            <div id="hotspot-points-container"></div>
+          </div>
+          <input type="hidden" name="issue_location" id="issue-location" />
+          <small class="help">Görselin üstüne tıklayıp konum ekleyin; kategori seçerseniz nokta o kategoriyle etiketlenir.</small>
+        </fieldset>
+        <label>Çözüm (varsa)<textarea name="solution"></textarea></label>
+        <label>Servis Deneyimi<textarea name="service_experience"></textarea></label>
+        <label>Medya (Görsel / Video / Ses) (max 5)
+          <div id="media-dropzone" class="media-dropzone" tabindex="0" aria-label="Medya yükleme alanı">
+            <p class="dz-text"><strong>Dosyaları bırakın</strong> veya <button type="button" id="media-browse-btn" class="dz-browse" aria-label="Dosya seç">Gözat</button><br><small>Desteklenen: Görsel, Video, Ses (Maks 5 dosya, tek dosya ≤ 15MB)</small></p>
+            <input type="file" id="issue-attachments" accept="image/*,audio/*,video/*" multiple class="dz-input" aria-hidden="true" />
+          </div>
+          <div id="media-preview" class="media-preview-list" aria-live="polite" aria-label="Seçilen medya önizlemeleri"></div>
+        </label>
+        <label style="margin-top:.2rem; display:flex; align-items:center; gap:.4rem; font-weight:500; font-size:.7rem;">
+          <input type="checkbox" id="issue-auto-close" style="margin:0; width:14px; height:14px;"> Kaydedince otomatik kapat
+        </label>
+        <div style="display:flex; gap:.6rem; justify-content:flex-end;">
+          <button type="button" class="outline" data-close="issue-modal">İptal</button>
+          <button type="submit" id="issue-save-btn">Kaydet</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <!-- Similar Issues Modal -->
+  <div id="similar-modal" class="modal-overlay hidden" aria-hidden="true" role="dialog">
+    <div class="modal" style="max-width:720px;">
+      <button class="close" data-close="similar-modal" aria-label="Kapat">×</button>
+      <h2>Benzer Problemler</h2>
+      <div id="similar-content" class="similar-content" style="display:flex; flex-direction:column; gap:.6rem; min-height:60px;">
+        <div class="empty">Yükleniyor...</div>
+      </div>
+      <div style="display:flex; gap:.6rem; justify-content:flex-end; margin-top:.6rem;">
+        <button type="button" class="outline" data-close="similar-modal">Vazgeç</button>
+        <button type="button" id="similar-continue">Yine de Devam Et</button>
+      </div>
+    </div>
+  </div>
+  <footer>
+    <small>v0.1 - SQLite & Express</small>
+  </footer>
+  <!-- User Issues Modal -->
+  <div id="user-issues-modal" class="modal-overlay hidden" aria-hidden="true" role="dialog">
+    <div class="modal" style="max-width:620px;">
+      <button class="close" data-close="user-issues-modal" aria-label="Kapat">×</button>
+      <h2 id="user-issues-title" style="margin-top:0;">Kullanıcı Problemleri</h2>
+      <div id="user-issues-content" class="user-issues-content" style="display:flex; flex-direction:column; gap:.7rem; min-height:60px;">
+        <div class="empty">Yükleniyor...</div>
+      </div>
+    </div>
+  </div>
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+  <!-- Hotspot Fullscreen Modal -->
+  <div id="hotspot-modal" class="modal-overlay hidden" aria-hidden="true" role="dialog" style="z-index:999;">
+    <div class="modal" style="max-width:900px; background:#181c22; padding:0; overflow:hidden; position:relative;">
+      <button class="close" data-close="hotspot-modal" aria-label="Kapat" style="position:absolute; top:1rem; right:1rem; z-index:2;">×</button>
+      <div style="padding:2.5rem 2.5rem 2rem 2.5rem; display:flex; flex-direction:column; align-items:center;">
+        <h2 style="margin-bottom:1.2rem;">Arıza Konumu (Büyük)</h2>
+        <div id="hotspot-full-preview" style="width:600px; max-width:90vw; aspect-ratio:16/9; background:#10171d; border-radius:14px; border:2px solid #2a313a; position:relative; overflow:hidden;"></div>
+      </div>
+    </div>
+  </div>
+  <!-- Photo Lightbox -->
+  <div id="photo-lightbox" class="lightbox-overlay hidden" aria-hidden="true" role="dialog" aria-label="Büyük fotoğraf">
+    <button class="lb-close" aria-label="Kapat">×</button>
+    <img id="lightbox-img" alt="Büyük fotoğraf" />
+    <div class="lb-caption" id="lightbox-caption"></div>
+  </div>
+  <script src="/js/app.js" type="module"></script>
+</body>
+</html>
