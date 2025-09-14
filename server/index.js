@@ -4,17 +4,23 @@ import cors from 'cors';
 import morgan from 'morgan';
 import helmet from 'helmet';
 import fs from 'fs';
-import initSqlJs from 'sql.js';
+import pg from 'pg';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import cookie from 'cookie';
 import multer from 'multer';
 
 const app = express();
-let PORT = process.env.PORT || 3001; // sabit varsayılan port
-const dbPath = path.join(process.cwd(), 'server', 'db', 'ev_problems.sqlite');
+let PORT = process.env.PORT || 3001;
 const uploadDir = path.join(process.cwd(), 'public', 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
+
+// PostgreSQL bağlantısı
+const { Pool } = pg;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgresql://localhost:5432/ev_problems',
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
 // Multer storage for media (images/audio/video)
 const storage = multer.diskStorage({
@@ -42,8 +48,7 @@ const uploadAny = multer({
   }
 });
 
-let SQL; // module
-let db;  // database instance
+let db = pool; // PostgreSQL pool instance
 
 // Statik / önerilen marka-model listesi (popüler EV araçları)
 const predefinedBrandModels = [
@@ -76,119 +81,150 @@ const issueTypes = [
   'Direksiyon / sürüş destek hatası'
 ];
 
-function loadDatabase() {
-  if (fs.existsSync(dbPath)) {
-    const filebuffer = fs.readFileSync(dbPath);
-    db = new SQL.Database(filebuffer);
-  } else {
-    db = new SQL.Database();
-    db.run(`CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
-            CREATE TABLE vehicles (id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT NOT NULL, model TEXT NOT NULL, UNIQUE(brand, model));
-            CREATE TABLE issues (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, vehicle_id INTEGER NOT NULL, title TEXT NOT NULL, issue_type TEXT, description TEXT NOT NULL, solution TEXT, service_experience TEXT, status TEXT DEFAULT 'open', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(vehicle_id) REFERENCES vehicles(id));`);
-    db.run(`CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, expires_at DATETIME, FOREIGN KEY(user_id) REFERENCES users(id));`);
+// PostgreSQL Database Functions
+async function initDatabase() {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT,
+        owned_brand TEXT,
+        owned_model TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS vehicles (
+        id SERIAL PRIMARY KEY,
+        brand TEXT NOT NULL,
+        model TEXT NOT NULL,
+        km INTEGER,
+        model_year INTEGER,
+        UNIQUE(brand, model)
+      );
+      
+      CREATE TABLE IF NOT EXISTS issues (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+        title TEXT NOT NULL,
+        issue_type TEXT,
+        description TEXT NOT NULL,
+        solution TEXT,
+        service_experience TEXT,
+        issue_location TEXT,
+        status TEXT DEFAULT 'open',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS user_vehicles (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        brand TEXT NOT NULL,
+        model TEXT NOT NULL,
+        km INTEGER,
+        model_year INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS comments (
+        id SERIAL PRIMARY KEY,
+        issue_id INTEGER NOT NULL REFERENCES issues(id),
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS issue_photos (
+        id SERIAL PRIMARY KEY,
+        issue_id INTEGER NOT NULL REFERENCES issues(id),
+        filename TEXT NOT NULL,
+        original_name TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS issue_attachments (
+        id SERIAL PRIMARY KEY,
+        issue_id INTEGER NOT NULL REFERENCES issues(id),
+        filename TEXT NOT NULL,
+        original_name TEXT,
+        mime TEXT,
+        kind TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS issue_updates (
+        id SERIAL PRIMARY KEY,
+        issue_id INTEGER NOT NULL REFERENCES issues(id),
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        title TEXT,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS issue_update_attachments (
+        id SERIAL PRIMARY KEY,
+        update_id INTEGER NOT NULL REFERENCES issue_updates(id),
+        filename TEXT NOT NULL,
+        original_name TEXT,
+        mime TEXT,
+        kind TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      
+      CREATE TABLE IF NOT EXISTS issue_followers (
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        issue_id INTEGER NOT NULL REFERENCES issues(id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(user_id, issue_id)
+      );
+      
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        issue_id INTEGER NOT NULL REFERENCES issues(id),
+        type TEXT NOT NULL,
+        payload TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        read_at TIMESTAMP
+      );
+    `);
+    console.log('✅ Database tables initialized');
+  } catch (error) {
+    console.error('❌ Database initialization failed:', error);
+    throw error;
   }
-  // Migration: issue_type sütunu yoksa ekle
-  const cols = all('PRAGMA table_info(issues)').map(c => c.name);
-  if (!cols.includes('issue_type')) {
-    run('ALTER TABLE issues ADD COLUMN issue_type TEXT');
-  }
-  // Migration: issue_location sütunu yoksa ekle (JSON string)
-  if (!cols.includes('issue_location')) {
-    try { run('ALTER TABLE issues ADD COLUMN issue_location TEXT'); } catch(e) { console.warn('issue_location column add failed', e.message); }
-  }
-  // Migration: password_hash
-  const userCols = all('PRAGMA table_info(users)').map(c => c.name);
-  if (!userCols.includes('password_hash')) {
-    run('ALTER TABLE users ADD COLUMN password_hash TEXT');
-  }
-  if (!userCols.includes('owned_brand')) {
-    run('ALTER TABLE users ADD COLUMN owned_brand TEXT');
-  }
-  if (!userCols.includes('owned_model')) {
-    run('ALTER TABLE users ADD COLUMN owned_model TEXT');
-  }
-  // Sessions table migration
-  const tables = all("SELECT name FROM sqlite_master WHERE type='table'").map(t=>t.name);
-  if(!tables.includes('sessions')) {
-    db.run(`CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, expires_at DATETIME, FOREIGN KEY(user_id) REFERENCES users(id));`);
-    persist();
-  }
-  if(!tables.includes('user_vehicles')) {
-    db.run(`CREATE TABLE user_vehicles (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, brand TEXT NOT NULL, model TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(user_id) REFERENCES users(id));`);
-    persist();
-  }
-  if(!tables.includes('comments')) {
-    db.run(`CREATE TABLE comments (id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER NOT NULL, user_id INTEGER NOT NULL, content TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(issue_id) REFERENCES issues(id), FOREIGN KEY(user_id) REFERENCES users(id));`);
-    persist();
-  }
-  // Always ensure issue_photos table exists (idempotent)
-  db.run(`CREATE TABLE IF NOT EXISTS issue_photos (id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER NOT NULL, filename TEXT NOT NULL, original_name TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(issue_id) REFERENCES issues(id));`);
-  // Generic attachments table (images/audio/video)
-  db.run(`CREATE TABLE IF NOT EXISTS issue_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER NOT NULL, filename TEXT NOT NULL, original_name TEXT, mime TEXT, kind TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(issue_id) REFERENCES issues(id));`);
-  // Issue developments/updates table
-  db.run(`CREATE TABLE IF NOT EXISTS issue_updates (id INTEGER PRIMARY KEY AUTOINCREMENT, issue_id INTEGER NOT NULL, user_id INTEGER NOT NULL, content TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(issue_id) REFERENCES issues(id), FOREIGN KEY(user_id) REFERENCES users(id));`);
-  // Update attachments (image/audio/video) linked to issue_updates
-  db.run(`CREATE TABLE IF NOT EXISTS issue_update_attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, update_id INTEGER NOT NULL, filename TEXT NOT NULL, original_name TEXT, mime TEXT, kind TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(update_id) REFERENCES issue_updates(id));`);
-  // Migration: add title column to issue_updates if missing
-  const updCols = all('PRAGMA table_info(issue_updates)').map(c=>c.name);
-  if(!updCols.includes('title')){
-    try { run('ALTER TABLE issue_updates ADD COLUMN title TEXT'); } catch(e) { console.warn('issue_updates title column add failed', e.message); }
-  }
-  // Followers & Notifications tables
-  db.run(`CREATE TABLE IF NOT EXISTS issue_followers (user_id INTEGER NOT NULL, issue_id INTEGER NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(user_id, issue_id));`);
-  db.run(`CREATE TABLE IF NOT EXISTS notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, issue_id INTEGER NOT NULL, type TEXT NOT NULL, payload TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, read_at DATETIME, FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(issue_id) REFERENCES issues(id));`);
-  // Migration: add km and model_year columns to user_vehicles if missing
-  const vehCols = all('PRAGMA table_info(user_vehicles)').map(c=>c.name);
-  if(!vehCols.includes('km')){
-    try { run('ALTER TABLE user_vehicles ADD COLUMN km INTEGER'); } catch(e) { console.warn('user_vehicles km column add failed', e.message); }
-  }
-  if(!vehCols.includes('model_year')){
-    try { run('ALTER TABLE user_vehicles ADD COLUMN model_year INTEGER'); } catch(e) { console.warn('user_vehicles model_year column add failed', e.message); }
-  }
-  
-  // Migration: add km and model_year columns to vehicles table if missing (for global vehicle data)
-  const globalVehCols = all('PRAGMA table_info(vehicles)').map(c => c.name);
-  if(!globalVehCols.includes('km')){
-    try { run('ALTER TABLE vehicles ADD COLUMN km INTEGER'); } catch(e) { console.warn('vehicles km column add failed', e.message); }
-  }
-  if(!globalVehCols.includes('model_year')){
-    try { run('ALTER TABLE vehicles ADD COLUMN model_year INTEGER'); } catch(e) { console.warn('vehicles model_year column add failed', e.message); }
-  }
-  
-  persist();
 }
 
-function persist() {
-  const data = db.export();
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  fs.writeFileSync(dbPath, Buffer.from(data));
+async function query(text, params = []) {
+  const result = await db.query(text, params);
+  return result.rows;
 }
 
-function all(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
-}
-function get(sql, params = []) {
-  return all(sql, params)[0];
-}
-function run(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.run(params);
-  stmt.free();
-  persist();
+async function queryOne(text, params = []) {
+  const result = await db.query(text, params);
+  return result.rows[0] || null;
 }
 
 // --- Notifications helper ---
-function notifyFollowers(issueId, actorUserId, type, payload){
+async function notifyFollowers(issueId, actorUserId, type, payload){
   try{
-    const followers = all('SELECT user_id FROM issue_followers WHERE issue_id = ?', [issueId]).map(r=> r.user_id).filter(uid => uid !== actorUserId);
+    const followers = await query('SELECT user_id FROM issue_followers WHERE issue_id = $1 AND user_id != $2', [issueId, actorUserId]);
     if(!followers.length) return;
     const p = typeof payload === 'string' ? payload : JSON.stringify(payload||{});
-    followers.forEach(uid=>{ try { run('INSERT INTO notifications (user_id, issue_id, type, payload) VALUES (?,?,?,?)', [uid, issueId, String(type), p]); } catch(_e){} });
+    for(const follower of followers) {
+      try { 
+        await query('INSERT INTO notifications (user_id, issue_id, type, payload) VALUES ($1,$2,$3,$4)', [follower.user_id, issueId, String(type), p]); 
+      } catch(_e){}
+    }
   }catch(e){ console.warn('notifyFollowers failed', e.message); }
 }
 
@@ -214,45 +250,50 @@ app.use((req,res,next)=>{
 });
 
 // ---- Auth Helpers ----
-function createSession(userId){
+async function createSession(userId){
   const id = crypto.randomBytes(24).toString('hex');
   const expires = new Date(Date.now() + 1000*60*60*24*7); // 7 gün
-  run('INSERT INTO sessions (id, user_id, expires_at) VALUES (?,?,?)', [id, userId, expires.toISOString()]);
+  await query('INSERT INTO sessions (id, user_id, expires_at) VALUES ($1,$2,$3)', [id, userId, expires.toISOString()]);
   return { id, expires };
 }
-function getSession(sessionId){
+async function getSession(sessionId){
   if(!sessionId) return null;
-  const row = get('SELECT * FROM sessions WHERE id = ?', [sessionId]);
+  const row = await queryOne('SELECT * FROM sessions WHERE id = $1', [sessionId]);
   if(!row) return null;
-  if(row.expires_at && new Date(row.expires_at) < new Date()) { run('DELETE FROM sessions WHERE id = ?', [sessionId]); return null; }
+  if(row.expires_at && new Date(row.expires_at) < new Date()) { 
+    await query('DELETE FROM sessions WHERE id = $1', [sessionId]); 
+    return null; 
+  }
   return row;
 }
-function currentUser(req){
+async function currentUser(req){
   const cookieHeader = req.headers.cookie;
   if(!cookieHeader) return null;
   const parsed = cookie.parse(cookieHeader);
   if(!parsed.sid) return null;
-  const sess = getSession(parsed.sid);
+  const sess = await getSession(parsed.sid);
   if(!sess) return null;
-  return get('SELECT id, username, owned_brand, owned_model FROM users WHERE id = ?', [sess.user_id]);
+  return await queryOne('SELECT id, username, owned_brand, owned_model FROM users WHERE id = $1', [sess.user_id]);
 }
-function requireAuth(req, res){
-  const u = currentUser(req);
+async function requireAuth(req, res){
+  const u = await currentUser(req);
   if(!u) { res.status(401).json({ error: 'Giriş gerekli' }); return null; }
   return u;
 }
 
-function getOrCreateUser(username) {
-  const found = get('SELECT id FROM users WHERE username = ?', [username]);
+async function getOrCreateUser(username) {
+  const found = await queryOne('SELECT id FROM users WHERE username = $1', [username]);
   if (found) return found.id;
-  run('INSERT INTO users (username) VALUES (?)', [username]);
-  return get('SELECT id FROM users WHERE username = ?', [username]).id;
+  await query('INSERT INTO users (username) VALUES ($1)', [username]);
+  const created = await queryOne('SELECT id FROM users WHERE username = $1', [username]);
+  return created.id;
 }
-function getOrCreateVehicle(brand, model) {
-  const found = get('SELECT id FROM vehicles WHERE brand = ? AND model = ?', [brand, model]);
+async function getOrCreateVehicle(brand, model) {
+  const found = await queryOne('SELECT id FROM vehicles WHERE brand = $1 AND model = $2', [brand, model]);
   if (found) return found.id;
-  run('INSERT INTO vehicles (brand, model) VALUES (?, ?)', [brand, model]);
-  return get('SELECT id FROM vehicles WHERE brand = ? AND model = ?', [brand, model]).id;
+  await query('INSERT INTO vehicles (brand, model) VALUES ($1, $2)', [brand, model]);
+  const created = await queryOne('SELECT id FROM vehicles WHERE brand = $1 AND model = $2', [brand, model]);
+  return created.id;
 }
 
 app.get('/api/vehicles', (req, res) => {
